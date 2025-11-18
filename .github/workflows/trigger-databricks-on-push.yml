@@ -1,0 +1,66 @@
+name: Trigger Databricks Job on Push
+
+on:
+  push:
+    branches: ["**"]   # change to ["main"] or specific branches if you prefer
+
+jobs:
+  run-databricks-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (for context)
+        uses: actions/checkout@v4
+
+      - name: Trigger Databricks job run
+        id: trigger
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_JOB_ID: ${{ secrets.DATABRICKS_JOB_ID }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -e
+          echo "Triggering Databricks job ${DATABRICKS_JOB_ID} on host ${DATABRICKS_HOST}"
+          PAYLOAD=$(jq -n --arg j "$DATABRICKS_JOB_ID" --arg repo "$REPO" --arg sha "$SHA" --arg branch "$BRANCH" \
+            '{job_id: ($j|tonumber), notebook_params: {"repo": $repo, "commit_sha": $sha, "branch": $branch}}')
+          RUN_NOW_URL="${DATABRICKS_HOST}/api/2.1/jobs/run-now"
+          RESP=$(curl -s -X POST -H "Authorization: Bearer ${DATABRICKS_TOKEN}" -H "Content-Type: application/json" -d "$PAYLOAD" "$RUN_NOW_URL")
+          echo "Run-now response: $RESP"
+          RUN_ID=$(echo "$RESP" | jq -r '.run_id // empty')
+          if [ -z "$RUN_ID" ]; then
+            echo "Failed to start run: $RESP"
+            exit 1
+          fi
+          echo "Started databricks run id: $RUN_ID"
+          echo "::set-output name=run_id::$RUN_ID"
+
+      - name: Wait for Databricks run to finish (poll)
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          RUN_ID=${{ steps.trigger.outputs.run_id }}
+          STATUS_URL="${DATABRICKS_HOST}/api/2.1/jobs/runs/get?run_id=${RUN_ID}"
+          echo "Polling run status for run_id $RUN_ID..."
+          # Poll for up to 20 minutes (increase if your notebook runs longer)
+          for i in {1..240}; do
+            sleep 5
+            S=$(curl -s -H "Authorization: Bearer ${DATABRICKS_TOKEN}" "$STATUS_URL")
+            LIFE_CYCLE_STATE=$(echo "$S" | jq -r '.state.life_cycle_state // empty')
+            RESULT_STATE=$(echo "$S" | jq -r '.state.result_state // empty')
+            echo "$(date +%T) Lifecycle: $LIFE_CYCLE_STATE, Result: $RESULT_STATE"
+            if [ "$LIFE_CYCLE_STATE" = "TERMINATED" ] || [ "$LIFE_CYCLE_STATE" = "SKIPPED" ]; then
+              if [ "$RESULT_STATE" = "SUCCESS" ]; then
+                echo "Databricks job succeeded."
+                exit 0
+              else
+                echo "Databricks job failed or was cancelled. Full status: $S"
+                exit 1
+              fi
+            fi
+          done
+          echo "Timeout waiting for Databricks run to finish."
+          exit 1
