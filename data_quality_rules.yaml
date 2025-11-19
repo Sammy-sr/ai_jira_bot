@@ -1,0 +1,53 @@
+# =============================================================================
+# DATA QUALITY RULES REPOSITORY
+# =============================================================================
+
+version: "1.0"
+updated_at: "2025-11-19"
+
+tables:
+  - table: prod.analytics.customers
+    description: Main customer dimension table
+    owner: data-platform@company.com
+    rules:
+      - column: customer_id
+        checks:
+          - not_null
+          - unique
+          - "length == 36"   # UUID format
+        severity: CRITICAL
+        note: Primary key – breaking change if violated
+
+      - column: email
+        checks:
+          - not_null
+          - "regex_match '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$'"
+        severity: HIGH
+        note: Added regex validation for proper email format
+
+      - column: created_at
+        checks:
+          - not_null
+          - "date >= '2020-01-01'"
+        severity: MEDIUM
+
+      - column: phone_number
+        checks:
+          - "is_null OR regex_match '^\\+?[0-9]{8,15}$'"
+        severity: LOW
+        note: International numbers allowed
+
+  - table: prod.analytics.orders
+    description: Fact table for all orders
+    owner: finance-team@company.com
+    rules:
+      - column: order_total_usd
+        checks:
+          - "value > 0"
+          - "value <= 1000000"   # flag suspiciously large orders
+        severity: HIGH
+
+      - column: order_status
+        checks:
+          - "in ['pending','shipped','delivered','cancelled']"
+        severity: CRITICAL
