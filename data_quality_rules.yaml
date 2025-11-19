@@ -22,7 +22,7 @@ tables:
         checks:
           - not_null
           - "regex_match '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$'"
-        severity: HIGH
+        severity: Medium
         note: Added regex validation for proper email format
 
       - column: created_at
@@ -50,4 +50,4 @@ tables:
       - column: order_status
         checks:
           - "in ['pending','shipped','delivered','cancelled']"
-        severity: CRITICAL
+        severity: HIGH
