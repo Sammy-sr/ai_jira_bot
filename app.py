@@ -1,111 +1,102 @@
-# app.py - FINAL 100% WORKING VERSION (NOV 11, 2025)
-from flask import Flask, request, jsonify
-import google.generativeai as genai
+%pip install -q google-generativeai
+
+# Secrets + widgets
+GITHUB_TOKEN = dbutils.secrets.get("mysecrets", "github_token")
+JIRA_API_TOKEN = dbutils.secrets.get("mysecrets", "jira_api_token")
+GEMINI_API_KEY = dbutils.secrets.get("mysecrets", "gemini_api_key")
+JIRA_EMAIL = dbutils.secrets.get("mysecrets", "jira_email")
+JIRA_ISSUE_KEY = dbutils.secrets.get("mysecrets", "jira_issue_key")
+try:
+    JIRA_BASE_URL = dbutils.secrets.get("mysecrets", "jira_base_url")
+except:
+    JIRA_BASE_URL = "https://your-domain.atlassian.net"
+
+dbutils.widgets.text("repo", "Sammy-sr/ai_jira_bot", "Repo (owner/repo)")
+dbutils.widgets.text("commit_sha", "", "Commit SHA (empty = latest)")
+dbutils.widgets.text("branch", "main", "Branch")
+
+REPO = dbutils.widgets.get("repo")
+COMMIT_SHA = dbutils.widgets.get("commit_sha").strip()
+BRANCH = dbutils.widgets.get("branch")
+
+print(f"✓ Ready on serverless | Repo: {REPO} | Commit: {COMMIT_SHA or 'latest on ' + BRANCH}")
+
 import requests
-import os
-import re
-from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
-# === FORCE LOAD .env FROM CURRENT DIRECTORY ===
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+session = requests.Session()
+session.mount("https://", HTTPAdapter(max_retries=Retry(total=5, backoff_factor=1)))
 
-# === CONFIGURE GEMINI ONLY AFTER .env IS LOADED ===
-api_key = os.getenv("GOOGLE_API_KEY")
-if not api_key:
-    raise ValueError("GOOGLE_API_KEY not found in .env file! Check file path and name.")
-print(f"Gemini API Key loaded: {api_key[:10]}...{api_key[-4:]}")  # Debug print
-genai.configure(api_key=api_key)
-
-app = Flask(__name__)
-
-# === CONFIG ===
-JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
-JIRA_EMAIL = os.getenv("JIRA_EMAIL")
-JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
-
-# === AI SUMMARY ===
-def get_ai_summary(commits):
-    text = "\n".join([f"{c['author']}: {c['message'].splitlines()[0]}" for c in commits])
-    try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(
-            f"Summarize these commits for JIRA in 3 bullet points with bold and emojis:\n\n{text}"
-        )
-        return "**AI Summary by Gemini 2.5 Flash**\n\n" + response.text.strip()
-    except Exception as e:
-        return f"Gemini failed: {str(e)}"
-
-# === POST TO JIRA ===
-def post_to_jira(key, text):
-    url = f"{JIRA_BASE_URL}/rest/api/3/issue/{key}/comment"
-    payload = {
-        "body": {
-            "type": "doc",
-            "version": 1,
-            "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]
-        }
+# GitHub helpers
+def get_commit(owner_repo: str, sha: str):
+    owner, repo = owner_repo.split("/", 1)
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+    r = session.get(url, headers=headers, timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    return {
+        "sha": j["sha"][:7],
+        "author": j["commit"]["author"].get("name") or "Unknown",
+        "message": j["commit"]["message"],
+        "url": j.get("html_url"),
+        "files": [f"{f.get('status','?')}:{f.get('filename','?')}" for f in j.get("files", [])]
     }
+
+def get_latest_commit_for_branch(owner_repo: str, branch: str):
+    owner, repo = owner_repo.split("/", 1)
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits/{branch}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    r = session.get(url, headers=headers, timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    return {
+        "sha": j["sha"][:7],
+        "author": j["commit"]["author"].get("name") or "Unknown",
+        "message": j["commit"]["message"],
+        "url": j.get("html_url"),
+        "files": []
+    }
+
+# Gemini summarizer — uses pre-installed library + current model (Nov 2025)
+def summarize_with_gemini(text: str) -> str:
     try:
-        print(f"Posting to JIRA {key}...")
-        r = requests.post(
-            url, json=payload,
-            auth=(JIRA_EMAIL, JIRA_API_TOKEN),
-            headers={"Content-Type": "application/json"},
-            timeout=15
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.0-flash")   # ← works perfectly on serverless
+        response = model.generate_content(
+            f"""You are a senior developer. Summarize this Git commit for a Jira ticket comment in exactly 3 short bullet points.
+Bold the main action and add one relevant emoji per bullet.
+
+Commit details:
+{text}
+
+Summary:"""
         )
-        print(f"JIRA Response Code: {r.status_code}")
-        print(f"JIRA Response Body: {r.text}")
-        if r.status_code == 201:
-            print(f"SUCCESS: Posted to {key}")
-            return True
-        else:
-            print(f"FAILED: {key} - {r.status_code} {r.text}")
-            return False
+        return "**AI Summary by Gemini** 🚀\n\n" + response.text.strip()
     except Exception as e:
-        print(f"JIRA EXCEPTION for {key}: {e}")
-        return False
+        print("Gemini error:", e)
+        first = text.strip().splitlines()[0] if text else "(none)"
+        return f"**Fallback Summary** ⚠️\n- **Commit**: {first}\n- Please review manually"
 
-# === WEBHOOK ===
-@app.route('/github-webhook', methods=['POST'])
-def webhook():
-    data = request.get_json() or {}
-    commits = data.get('commits', [])
-    
-    if not commits:
-        return jsonify({"status": "no commits"}), 200
-    
-    commit_list = []
-    jira_keys = set()
-    
-    for c in commits:
-        author = c.get('author', {}).get('name', 'Unknown')
-        message = c.get('message', '')
-        commit_list.append({"author": author, "message": message})
-        matches = re.findall(r'[A-Z][A-Z0-9]*-\d+', message.upper())
-        jira_keys.update(matches)
-    
-    if not jira_keys:
-        return jsonify({"status": "no JIRA keys found"}), 200
-    
-    summary = get_ai_summary(commit_list)
-    
-    success_keys = []
-    for key in jira_keys:
-        if post_to_jira(key, summary):
-            success_keys.append(key)
-    
-    return jsonify({
-        "status": "SUCCESS!",
-        "jira_keys": list(jira_keys),
-        "posted_to": success_keys,
-        "summary_preview": summary[:200]
-    }), 200
+# Post to Jira
+def post_to_jira(comment: str):
+    url = f"{JIRA_BASE_URL}/rest/api/3/issue/{JIRA_ISSUE_KEY}/comment"
+    payload = {"body": {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": comment}]}]}}
+    r = session.post(url, json=payload, auth=(JIRA_EMAIL, JIRA_API_TOKEN), timeout=20)
+    r.raise_for_status()
+    return r.status_code
 
-# === START ===
-if __name__ == "__main__":
-    print("="*70)
-    print("AI JIRA BOT IS LIVE AND READY!")
-    print("URL: http://localhost:5000/github-webhook")
-    print("TEST WITH CURL BELOW")
-    print("="*70)
-    app.run(host="0.0.0.0", port=5000, debug=False)
+# Main flow
+commit = get_commit(REPO, COMMIT_SHA) if COMMIT_SHA else get_latest_commit_for_branch(REPO, BRANCH)
+
+commit_text = f"Commit {commit['sha']} by {commit['author']}\n{commit['url']}\n\nMessage:\n{commit['message']}\n\nFiles changed: {'; '.join(commit['files'][:30]) or 'none'}"
+
+print("✓ Commit fetched")
+
+summary = summarize_with_gemini(commit_text)
+print("\nGemini Summary:\n", summary)
+
+status = post_to_jira(summary)
+print(f"\n🎉 Posted to Jira! Status: {status} → All done on serverless!")
