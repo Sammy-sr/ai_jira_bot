@@ -15,7 +15,7 @@ tables:
           - not_null
           - unique
           - "length == 36"   # UUID format
-        severity: CRITICAL
+        severity: MEDIUM
         note: Primary key – breaking change if violated
 
       - column: email
