@@ -31,7 +31,7 @@ tables:
           - "date >= '2020-01-01'"
         severity: MEDIUM
 
-      - column: phone_number
+      - column: mobile_number
         checks:
           - "is_null OR regex_match '^\\+?[0-9]{8,15}$'"
         severity: LOW
