@@ -6,7 +6,7 @@ configs:
   
   - name: "Project A"
     issue_key: "DEV2-2"
-    active: true
+    active:  false
   
   - name: "Project B"
     issue_key: "DEV2-3"
