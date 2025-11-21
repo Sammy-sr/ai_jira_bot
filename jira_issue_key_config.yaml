@@ -6,10 +6,10 @@ configs:
   
   - name: "Project A"
     issue_key: "DEV2-2"
-    active: false
+    active: true
   
   - name: "Project B"
     issue_key: "DEV2-3"
-    active: true
+    active: false
   
   # Add as many as you want — only "active: true" will appear in dropdown
