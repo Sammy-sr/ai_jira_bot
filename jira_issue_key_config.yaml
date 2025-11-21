@@ -2,14 +2,14 @@
 configs:
   - name: "ai based github integration"
     issue_key: "DEV2-1"
-    active: false
+    active: true
   
-  - name: "Project A"
-    issue_key: "DEV2-2"
-    active:  true
+  # - name: "Project A"
+  #   issue_key: "DEV2-2"
+  #   active:  false
   
-  - name: "Project B"
-    issue_key: "DEV2-3"
-    active: false
+  # - name: "Project B"
+  #   issue_key: "DEV2-3"
+  #   active: false
   
   # Add as many as you want — only "active: true" will appear in dropdown

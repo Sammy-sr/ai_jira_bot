@@ -45,7 +45,7 @@ tables:
         checks:
           - "value > 0"
           - "value <= 1000000"   # flag suspiciously large orders
-        severity: LOW
+        severity: MEDIUM
 
       - column: order_status
         checks:
