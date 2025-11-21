@@ -2,11 +2,11 @@
 configs:
   - name: "ai based github integration"
     issue_key: "DEV2-1"
-    active: true
+    active: false
   
   - name: "Project A"
     issue_key: "DEV2-2"
-    active:  false
+    active:  true
   
   - name: "Project B"
     issue_key: "DEV2-3"
