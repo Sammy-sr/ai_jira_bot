@@ -1,10 +1,10 @@
 # jira_config.yaml — edit this file and commit, or just keep it locally
 configs:
-  - name: "ai based github integration"
-    issue_key: "DEV2-1"
+  # - name: "ai based github integration"
+  #   issue_key: "DEV2-1"
   
-  # - name: "Project A"
-  #   issue_key: "DEV2-2"
+  - name: "Project A"
+    issue_key: "DEV2-2"
   
   # - name: "Project B"
   #   issue_key: "DEV2-3"
