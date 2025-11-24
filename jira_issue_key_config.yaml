@@ -2,7 +2,6 @@
 configs:
   - name: "ai based github integration"
     issue_key: "DEV2-1"
-    branch: "main"
   
   # - name: "Project A"
   #   issue_key: "DEV2-2"
