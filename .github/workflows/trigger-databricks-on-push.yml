@@ -5,97 +5,40 @@ on:
     branches: ["**"]
 
 jobs:
-  run-databricks-job:
+  trigger-databricks:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout (for context)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 2   # Needed to get author info properly
-
-      - name: Trigger Databricks job run
-        id: trigger
+      - name: Trigger Databricks Job
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
           DATABRICKS_JOB_ID: ${{ secrets.DATABRICKS_JOB_ID }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-          BRANCH: ${{ github.ref_name }}
-          # New variables
-          COMMIT_AUTHOR_NAME: ${{ github.event.head_commit.author.name }}
-          COMMIT_AUTHOR_EMAIL: ${{ github.event.head_commit.author.email }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          COMMIT_URL: ${{ github.event.head_commit.url }}  # direct link to commit on GitHub
         run: |
-          set -e
-          echo "Triggering Databricks job ${DATABRICKS_JOB_ID}"
+          set -euo pipefail
 
-          PAYLOAD=$(jq -n \
-            --arg j "$DATABRICKS_JOB_ID" \
-            --arg repo "$REPO" \
-            --arg sha "$SHA" \
-            --arg branch "$BRANCH" \
-            --arg author_name "$COMMIT_AUTHOR_NAME" \
-            --arg author_email "$COMMIT_AUTHOR_EMAIL" \
-            --arg message "$COMMIT_MESSAGE" \
-            --arg commit_url "$COMMIT_URL" \
-            '{
-              job_id: ($j|tonumber),
-              notebook_params: {
-                repo: $repo,
-                commit_sha: $sha,
-                branch: $branch,
-                commit_author_name: $author_name,
-                commit_author_email: $author_email,
-                commit_message: $message,
-                commit_url: $commit_url
-              }
-            }')
+          # Safely escape the commit message (handles newlines, quotes, etc.)
+          COMMIT_MESSAGE=$(jq -R -s <<< "${{ github.event.head_commit.message }}")
 
-          RUN_NOW_URL="${DATABRICKS_HOST}/api/2.1/jobs/run-now"
-          RESP=$(curl -s -X POST \
-            -H "Authorization: Bearer ${DATABRICKS_TOKEN}" \
+          curl -X POST "${DATABRICKS_HOST%/}/api/2.1/jobs/run-now" \
+            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD" "$RUN_NOW_URL")
+            -d @- << EOF
+          {
+            "job_id": $DATABRICKS_JOB_ID,
+            "notebook_params": {
+              "repo": "${{ github.repository }}",
+              "commit_sha": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}",
+              "commit_author_name": "${{ github.event.head_commit.author.name }}",
+              "commit_author_email": "${{ github.event.head_commit.author.email }}",
+              "commit_message": $COMMIT_MESSAGE,
+              "commit_url": "${{ github.event.head_commit.url }}",
+              "github_actor": "${{ github.actor }}",
+              "github_run_id": "${{ github.run_id }}"
+            },
+            "run_name": "Push by ${{ github.actor }} • ${{ github.sha }}",
+            "idempotency_key": "${{ github.run_id }}-${{ github.run_attempt }}"
+          }
+          EOF
 
-          echo "Run-now response: $RESP"
-          RUN_ID=$(echo "$RESP" | jq -r '.run_id // empty')
-          if [ -z "$RUN_ID" ]; then
-            echo "Failed to start run: $RESP"
-            exit 1
-          fi
-          echo "Started Databricks run id: $RUN_ID"
-          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT   # Modern syntax (recommended)
-
-      - name: Wait for Databricks run to finish (poll)
-        env:
-          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-          RUN_ID: ${{ steps.trigger.outputs.run_id }}
-        run: |
-          STATUS_URL="${DATABRICKS_HOST}/api/2.1/jobs/runs/get?run_id=${RUN_ID}"
-          echo "Polling run $RUN_ID..."
-
-          for i in {1..240}; do
-            sleep 5
-            S=$(curl -s -H "Authorization: Bearer ${DATABRICKS_TOKEN}" "$STATUS_URL")
-            LIFE_CYCLE_STATE=$(echo "$S" | jq -r '.state.life_cycle_state // empty')
-            RESULT_STATE=$(echo "$S" | jq -r '.state.result_state // empty')
-            echo "$(date +%T) → $LIFE_CYCLE_STATE / $RESULT_STATE"
-
-            if [ "$LIFE_CYCLE_STATE" = "TERMINATED" ] || [ "$LIFE_CYCLE_STATE" = "SKIPPED" ]; then
-              if [ "$RESULT_STATE" = "SUCCESS" ]; then
-                echo "Databricks job succeeded!"
-                exit 0
-              else
-                echo "Databricks job failed. Full response:"
-                echo "$S" | jq .
-                exit 1
-              fi
-            fi
-          done
-
-          echo "Timeout after 20 minutes"
-          exit 1
+          echo "Databricks job triggered successfully!"
