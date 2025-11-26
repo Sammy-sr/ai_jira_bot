@@ -37,6 +37,22 @@ tables:
         severity: LOW
         note: International numbers allowed
 
+  - table: prod.analytics.orders
+description: Fact table for all orders
+owner: finance-team@company.com
+rules:
+- column: order_total_usd
+  checks:
+    - "value > 0"
+    - "value <= 1000000" 
+  severity: MEDIUM
+
+- column: order_status
+  checks:
+    - "in ['pending','shipped','delivered','cancelled']"
+  severity: HIGH
+
+
 
 
 
