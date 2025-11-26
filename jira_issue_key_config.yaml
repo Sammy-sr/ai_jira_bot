@@ -8,4 +8,6 @@ configs:
   
   # - name: "Project B"
   #   issue_key: "DEV2-3"
-  
+
+  # - name: "Project C"
+  # issue_key: "DEV2-4"
