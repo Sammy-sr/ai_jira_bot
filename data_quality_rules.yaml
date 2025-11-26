@@ -8,7 +8,7 @@ updated_at: "2025-11-19"
 tables:
   - table: prod.analytics.customers
     description: Main customer dimension table
-    owner: data-platform@company.com
+    owner: data.ai-platform@company.com
     rules:
       - column: customer_id
         checks:
